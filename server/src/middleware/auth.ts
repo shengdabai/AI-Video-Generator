@@ -39,11 +39,12 @@ export function generateTokens(payload: JwtPayload): {
     env.JWT_REFRESH_SECRET,
     { expiresIn: env.JWT_REFRESH_EXPIRES_IN as string & { __brand: 'StringValue' } } as jwt.SignOptions
   );
+  const { exp, iat } = jwt.decode(accessToken) as jwt.JwtPayload;
 
   return {
     accessToken,
     refreshToken,
-    expiresIn: 7 * 24 * 60 * 60,
+    expiresIn: exp! - iat!,
   };
 }
 
