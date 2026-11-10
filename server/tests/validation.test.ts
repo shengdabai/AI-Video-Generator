@@ -45,3 +45,9 @@ test('validation errors without a custom message still return a 400 message', as
   assertValidationError(await call(authRouter, 'post', '/login', {}));
   assertValidationError(await call(usersRouter, 'put', '/me', { avatarUrl: 'not a url' }));
 });
+
+test('AI request boundaries reject oversized prompts, styles and fractional scene counts', async () => {
+  assertValidationError(await call(aiRouter, 'post', '/enhance', { prompt: 'valid prompt', style: 'x'.repeat(101) }));
+  assertValidationError(await call(aiRouter, 'post', '/storyboard', { enhancedPrompt: 'x'.repeat(20001) }));
+  assertValidationError(await call(aiRouter, 'post', '/storyboard', { enhancedPrompt: 'valid enhanced prompt', sceneCount: 2.5 }));
+});

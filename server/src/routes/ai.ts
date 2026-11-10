@@ -18,7 +18,7 @@ const router = Router();
 
 const enhanceSchema = z.object({
   prompt: z.string().min(5, '描述至少5个字符').max(500, '描述最多500个字符'),
-  style: z.string().default('cinematic'),
+  style: z.string().max(100).default('cinematic'),
   language: z.enum(['zh', 'en']).default('zh'),
 });
 
@@ -49,7 +49,7 @@ router.post(
         })
       );
     } catch (error) {
-      process.stderr.write(`[AI Enhance Error] ${error instanceof Error ? error.stack : String(error)}\n`);
+      process.stderr.write('[AI Enhance Error] Upstream request or response failed\n');
       res.status(500).json(apiResponse(null, 'AI 增强服务暂时不可用，请稍后重试', 500));
     }
   }
@@ -58,9 +58,9 @@ router.post(
 // ==================== Generate Storyboard ====================
 
 const storyboardSchema = z.object({
-  enhancedPrompt: z.string().min(10, '增强描述至少10个字符'),
+  enhancedPrompt: z.string().min(10, '增强描述至少10个字符').max(20000),
   targetDuration: z.number().min(10).max(300).optional(),
-  sceneCount: z.number().min(2).max(8).default(4),
+  sceneCount: z.number().int().min(2).max(8).default(4),
 });
 
 router.post(
@@ -95,7 +95,7 @@ router.post(
         })
       );
     } catch (error) {
-      process.stderr.write(`[AI Storyboard Error] ${error instanceof Error ? error.stack : String(error)}\n`);
+      process.stderr.write('[AI Storyboard Error] Upstream request or response failed\n');
       res.status(500).json(apiResponse(null, '分镜生成服务暂时不可用，请稍后重试', 500));
     }
   }

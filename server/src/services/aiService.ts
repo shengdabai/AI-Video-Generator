@@ -4,6 +4,25 @@
  */
 
 import { env } from '../config/env';
+import { z } from 'zod';
+
+// Core fields stay strict; secondary fields fall back to defaults so small model
+// format drift (a missing mood, "5" instead of 5) does not turn into a 500.
+const enhanceResultSchema = z.object({
+  enhancedPrompt: z.string().trim().min(1).max(5000),
+  styleSuggestions: z.array(z.string().max(100)).max(10).catch([]),
+  mood: z.string().max(100).catch(''),
+  durationSuggestion: z.coerce.number().min(1).max(300).catch(30),
+});
+
+const storyboardResultSchema = z.object({
+  scenes: z.array(z.object({
+    prompt: z.string().trim().min(1).max(5000),
+    duration: z.coerce.number().catch(5),
+    camera: z.string().nullable().catch(null),
+    movement: z.string().nullable().catch(null),
+  })).min(2).max(8),
+});
 
 interface EnhanceResult {
   enhancedPrompt: string;
@@ -102,28 +121,18 @@ Rules:
 - Scenes should flow naturally and tell a cohesive story`;
 }
 
-function parseJsonResponse<T>(text: string): T {
+function parseJsonResponse(text: string): unknown {
+  if (text.length > 100000) throw new Error('AI response exceeds size limit');
   const cleaned = text
     .replace(/```json\s*/g, '')
     .replace(/```\s*/g, '')
     .trim();
 
   try {
-    return JSON.parse(cleaned) as T;
+    return JSON.parse(cleaned);
   } catch (error) {
-    const reason = error instanceof Error ? error.message : 'Unknown parse error';
-    // Raw model output may echo user prompts (or anything pasted into them), so
-    // never log it in production. In non-production, surface a truncated preview
-    // to make LLM format drift diagnosable; in production log only safe metadata.
-    if (env.NODE_ENV !== 'production') {
-      const preview = cleaned.length > 500 ? `${cleaned.slice(0, 500)}…` : cleaned;
-      // eslint-disable-next-line no-console
-      console.error(`[aiService] Failed to parse model JSON response: ${reason}\nRaw response: ${preview}`);
-    } else {
-      // eslint-disable-next-line no-console
-      console.error(`[aiService] Failed to parse model JSON response: ${reason} (length=${cleaned.length})`);
-    }
-    throw new Error(`Invalid AI JSON response: ${reason}`);
+    // JSON.parse messages can contain raw input; upstream errors can contain API keys.
+    throw new Error('Invalid AI JSON response');
   }
 }
 
@@ -185,14 +194,12 @@ export async function enhancePrompt(
   try {
     const prompt = buildEnhancePrompt(userPrompt, style, language);
     const response = await callGemini(prompt);
-    return parseJsonResponse<EnhanceResult>(response);
+    return enhanceResultSchema.parse(parseJsonResponse(response));
   } catch (error) {
     if (!env.GEMINI_API_KEY) {
       return createFallbackEnhance(userPrompt);
     }
-    throw new Error(
-      `AI enhancement failed: ${error instanceof Error ? error.message : 'Unknown error'}`
-    );
+    throw new Error('AI enhancement failed');
   }
 }
 
@@ -200,16 +207,17 @@ export async function generateStoryboard(
   enhancedPrompt: string,
   sceneCount: number = 4
 ): Promise<StoryboardResult> {
-  const clampedCount = Math.max(2, Math.min(8, sceneCount));
+  const clampedCount = Number.isFinite(sceneCount) ? Math.max(2, Math.min(8, Math.round(sceneCount))) : 4;
 
   try {
     const prompt = buildStoryboardPrompt(enhancedPrompt, clampedCount);
     const response = await callGemini(prompt);
-    const result = parseJsonResponse<StoryboardResult>(response);
+    const result = storyboardResultSchema.parse(parseJsonResponse(response));
     const cameras = ['wide', 'medium', 'close-up', 'extreme-close-up'];
     const movements = ['static', 'pan', 'tilt', 'zoom', 'track', 'push', 'pull'];
-    const scenes = result.scenes.map((scene) => ({
+    const scenes = result.scenes.map((scene, index) => ({
       ...scene,
+      index: index + 1,
       duration: Math.max(1, Math.min(60, Math.round(scene.duration))),
       camera: cameras.includes(scene.camera ?? '') ? scene.camera : null,
       movement: movements.includes(scene.movement ?? '') ? scene.movement : null,
@@ -223,8 +231,6 @@ export async function generateStoryboard(
     if (!env.GEMINI_API_KEY) {
       return createFallbackStoryboard(enhancedPrompt, clampedCount);
     }
-    throw new Error(
-      `Storyboard generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`
-    );
+    throw new Error('Storyboard generation failed');
   }
 }
