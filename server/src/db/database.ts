@@ -39,6 +39,7 @@ function initializeDatabase(): void {
       type TEXT NOT NULL,
       expires_at TEXT NOT NULL,
       used INTEGER DEFAULT 0,
+      attempts INTEGER NOT NULL DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -104,6 +105,12 @@ function initializeDatabase(): void {
     CREATE INDEX IF NOT EXISTS idx_tasks_status ON generation_tasks(status);
     CREATE INDEX IF NOT EXISTS idx_verification_phone ON verification_codes(phone, type);
   `);
+
+  // Preserve existing installations while adding per-code guess limits.
+  const columns = db.pragma('table_info(verification_codes)') as { name: string }[];
+  if (!columns.some((column) => column.name === 'attempts')) {
+    db.exec('ALTER TABLE verification_codes ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0');
+  }
 }
 
 initializeDatabase();

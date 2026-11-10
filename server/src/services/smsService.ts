@@ -4,7 +4,7 @@
  * In production, replace with real SMS provider (e.g., Aliyun SMS)
  */
 
-import { randomUUID as uuidv4 } from 'node:crypto';
+import { randomUUID as uuidv4, randomInt } from 'node:crypto';
 import db from '../db/database';
 
 interface VerificationRecord {
@@ -14,10 +14,11 @@ interface VerificationRecord {
   type: string;
   expires_at: string;
   used: number;
+  attempts: number;
 }
 
 function generateCode(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return randomInt(100000, 1000000).toString();
 }
 
 function getExpiresAt(): string {
@@ -32,16 +33,18 @@ export function sendVerificationCode(
   const code = generateCode();
   const id = uuidv4();
 
-  db.prepare(`
-    UPDATE verification_codes
-    SET used = 1
-    WHERE phone = ? AND type = ? AND used = 0
-  `).run(phone, type);
+  db.transaction(() => {
+    db.prepare(`
+      UPDATE verification_codes
+      SET used = 1
+      WHERE phone = ? AND type = ? AND used = 0
+    `).run(phone, type);
 
-  db.prepare(`
-    INSERT INTO verification_codes (id, phone, code, type, expires_at)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(id, phone, code, type, getExpiresAt());
+    db.prepare(`
+      INSERT INTO verification_codes (id, phone, code, type, expires_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(id, phone, code, type, getExpiresAt());
+  })();
 
   // In development, log the code to console for testing
   if (process.env.NODE_ENV !== 'production') {
@@ -80,11 +83,12 @@ export function verifyCode(
   }
 
   const isExpired = new Date(record.expires_at) < new Date();
-  if (isExpired) {
+  if (isExpired || record.attempts >= 5) {
     return false;
   }
 
   if (record.code !== code) {
+    db.prepare('UPDATE verification_codes SET attempts = attempts + 1 WHERE id = ?').run(record.id);
     return false;
   }
 
